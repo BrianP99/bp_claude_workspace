@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Google Sheets Live Budget Dashboard</title>
+<style>
+  :root { color-scheme: light dark; }
+
+  .viz-root {
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6; /* blue */
+    --series-2:       #eb6834; /* orange */
+    --good:           #0ca30c;
+    --warning:        #fab219;
+    --critical:       #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      --surface-1:      #1a1a19;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --good:           #0ca30c;
+      --warning:        #fab219;
+      --critical:       #e66767;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    --surface-1:      #1a1a19;
+    --page-plane:     #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --good:           #0ca30c;
+    --warning:        #fab219;
+    --critical:       #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page-plane);
+    color: var(--text-primary);
+  }
+  .viz-root { padding: 24px; max-width: 1100px; margin: 0 auto; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .header h1 { font-size: 20px; margin: 0; }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 0 rgba(12,163,12,0.5);
+    animation: pulse 2s infinite;
+  }
+  .dot.stale { background: var(--critical); animation: none; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(12,163,12,0.4); }
+    70%  { box-shadow: 0 0 0 6px rgba(12,163,12,0); }
+    100% { box-shadow: 0 0 0 0 rgba(12,163,12,0); }
+  }
+  button.refresh {
+    font: inherit;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button.refresh:hover { border-color: var(--series-1); }
+
+  .error-banner {
+    display: none;
+    background: var(--surface-1);
+    border: 1px solid var(--critical);
+    color: var(--critical);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .error-banner.visible { display: block; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  /* 예산 카드 */
+  .budget-card { margin-bottom: 20px; }
+  .budget-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .budget-hero { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .budget-hero .unit { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 4px; }
+  .budget-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  .budget-status.good { color: var(--good); }
+  .budget-status.warning { color: var(--warning); }
+  .budget-status.critical { color: var(--critical); }
+  .budget-track {
+    position: relative;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--gridline);
+    overflow: hidden;
+  }
+  .budget-fill {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    border-radius: 999px;
+    transition: width 0.3s ease;
+  }
+  .budget-fill.good { background: var(--good); }
+  .budget-fill.warning { background: var(--warning); }
+  .budget-fill.critical { background: var(--critical); }
+  .budget-sub {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .budget-config-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .tile .label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .tile .value {
+    font-size: 26px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .chart-title {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 12px;
+  }
+  svg { display: block; overflow: visible; }
+  .bar-rect { fill: var(--series-1); }
+  .bar-rect:hover { fill: var(--series-2); }
+  .bar-label {
+    font-size: 11px;
+    fill: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .axis-label { font-size: 11px; fill: var(--text-muted); }
+  .grid-line { stroke: var(--gridline); stroke-width: 1; }
+  .baseline-line { stroke: var(--baseline); stroke-width: 1; }
+  .line-path { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .line-dot { fill: var(--series-1); }
+  .crosshair { stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; }
+
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    opacity: 0;
+    transition: opacity 0.1s;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  .tooltip.visible { opacity: 1; }
+
+  .table-wrap {
+    overflow-x: auto;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 480px; }
+  th, td { padding: 8px 12px; text-align: left; white-space: nowrap; }
+  th {
+    color: var(--text-muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--gridline);
+    cursor: pointer;
+    user-select: none;
+  }
+  th:hover { color: var(--text-primary); }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  th.num { text-align: right; }
+  tr:not(:last-child) td { border-bottom: 1px solid var(--gridline); }
+  .empty-state { color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="header">
+    <h1>💰 예산 대시보드</h1>
+    <div class="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">연결 중…</span>
+      <button class="refresh" id="refreshBtn">지금 새로고침</button>
+    </div>
+  </div>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <div class="card budget-card" id="budgetCard"></div>
+
+  <div class="tiles" id="tiles"></div>
+  <div class="charts" id="charts"></div>
+  <div class="table-wrap">
+    <table id="dataTable">
+      <thead><tr id="tableHead"></tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ---- 설정: 이 값들만 바꾸면 다른 시트/예산으로 재사용 가능 ----
+const SHEET_ID = '1V2Nf4YhmSfdHKFjaw8ydObv4aj3e94M185qWdxueHF8';
+const GID = null;               // 특정 탭을 쓰려면 시트 URL의 gid=숫자 값을 넣기. null이면 첫 번째 탭.
+const POLL_INTERVAL_MS = 10000; // 폴링 주기 (ms)
+const TOTAL_BUDGET = null;      // 전체 예산 금액(숫자)을 입력하면 예산 카드가 표시됨. 예: 1000000
+// ------------------------------------------------------------
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const errorBanner = document.getElementById('errorBanner');
+const budgetCard = document.getElementById('budgetCard');
+const tilesEl = document.getElementById('tiles');
+const chartsEl = document.getElementById('charts');
+const tableHead = document.getElementById('tableHead');
+const tableBody = document.getElementById('tableBody');
+const tooltip = document.getElementById('tooltip');
+const refreshBtn = document.getElementById('refreshBtn');
+
+let pollTimer = null;
+let sortState = { col: null, dir: 1 };
+
+function buildGvizUrl(callbackName) {
+  const params = new URLSearchParams({ tqx: `out:json;responseHandler:${callbackName}` });
+  if (GID !== null) params.set('gid', String(GID));
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?${params.toString()}`;
+}
+
+// gviz 응답은 CORS 헤더가 없어 fetch()로 못 읽으므로 JSONP(<script> 태그)로 우회한다.
+function fetchSheetJsonp(timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const callbackName = '__gsheetCb_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    let settled = false;
+
+    const cleanup = () => {
+      delete window[callbackName];
+      script.remove();
+      clearTimeout(timer);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('요청 시간이 초과되었습니다.'));
+    }, timeoutMs);
+
+    window[callbackName] = (response) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (response.status === 'error') {
+        reject(new Error(response.errors?.[0]?.detailed_message || '시트를 읽을 수 없습니다.'));
+      } else {
+        resolve(response);
+      }
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('시트 요청에 실패했습니다. 시트가 공개(링크가 있으면 누구나 보기)로 설정되어 있는지 확인하세요.'));
+    };
+    script.src = buildGvizUrl(callbackName);
+    document.body.appendChild(script);
+  });
+}
+
+function parseDateCell(v) {
+  if (typeof v === 'string' && v.startsWith('Date(')) {
+    const parts = v.slice(5, -1).split(',').map(Number);
+    return new Date(parts[0], parts[1], parts[2] || 1, parts[3] || 0, parts[4] || 0, parts[5] || 0);
+  }
+  return new Date(v);
+}
+
+function parseTable(response) {
+  const table = response.table;
+  const cols = table.cols.map((c, i) => ({
+    id: c.id || `col${i}`,
+    label: c.label || `Column ${i + 1}`,
+    type: c.type,
+  }));
+  const rows = table.rows.map((r) =>
+    cols.map((col, i) => {
+      const cell = r.c[i];
+      if (!cell || cell.v === null || cell.v === undefined) return null;
+      if (col.type === 'date' || col.type === 'datetime') return parseDateCell(cell.v);
+      return cell.v;
+    })
+  );
+  return { cols, rows };
+}
+
+function setStatus(ok, message) {
+  statusDot.classList.toggle('stale', !ok);
+  statusText.textContent = message;
+}
+
+function showError(message) {
+  errorBanner.textContent = message;
+  errorBanner.classList.add('visible');
+}
+function hideError() {
+  errorBanner.classList.remove('visible');
+}
+
+function formatNumber(n) {
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(n);
+}
+
+function firstNumericColIndex(data) {
+  return data.cols.findIndex((c) => c.type === 'number');
+}
+function totalSpent(data) {
+  const idx = firstNumericColIndex(data);
+  if (idx === -1) return 0;
+  return data.rows.reduce((sum, r) => sum + (typeof r[idx] === 'number' ? r[idx] : 0), 0);
+}
+
+// ---------- 예산 카드 ----------
+function renderBudget(data) {
+  if (TOTAL_BUDGET === null || TOTAL_BUDGET === undefined) {
+    budgetCard.style.display = 'none';
+    return;
+  }
+  budgetCard.style.display = '';
+  const spent = totalSpent(data);
+  const remaining = TOTAL_BUDGET - spent;
+  const pct = TOTAL_BUDGET > 0 ? (spent / TOTAL_BUDGET) * 100 : 0;
+  const fillPct = Math.min(pct, 100);
+
+  let status = 'good', icon = '✓', statusLabel = '여유 있음';
+  if (pct >= 100) { status = 'critical'; icon = '✕'; statusLabel = '예산 초과'; }
+  else if (pct >= 80) { status = 'warning'; icon = '⚠'; statusLabel = '주의 필요'; }
+
+  budgetCard.innerHTML = `
+    <div class="budget-top">
+      <div>
+        <div class="tile label" style="margin-bottom:4px;">남은 예산</div>
+        <div class="budget-hero">${formatNumber(remaining)}<span class="unit">원</span></div>
+      </div>
+      <span class="budget-status ${status}">${icon} ${statusLabel}</span>
+    </div>
+    <div class="budget-track">
+      <div class="budget-fill ${status}" style="width:${fillPct}%"></div>
+    </div>
+    <div class="budget-sub">
+      <span>지출 ${formatNumber(spent)}원</span>
+      <span>예산 ${formatNumber(TOTAL_BUDGET)}원 · ${formatNumber(Math.round(pct * 10) / 10)}% 사용</span>
+    </div>
+  `;
+}
+
+// ---------- 통계 타일 ----------
+function renderTiles(data) {
+  tilesEl.innerHTML = '';
+  const numericCols = data.cols
+    .map((c, i) => ({ ...c, i }))
+    .filter((c) => c.type === 'number');
+
+  tilesEl.appendChild(makeTile('전체 행', formatNumber(data.rows.length)));
+
+  numericCols.slice(0, 5).forEach((col) => {
+    const values = data.rows.map((r) => r[col.i]).filter((v) => typeof v === 'number');
+    if (!values.length) return;
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avg = sum / values.length;
+    tilesEl.appendChild(makeTile(`${col.label} 합계`, formatNumber(sum)));
+    tilesEl.appendChild(makeTile(`${col.label} 평균`, formatNumber(Math.round(avg * 100) / 100)));
+  });
+}
+
+function makeTile(label, value) {
+  const div = document.createElement('div');
+  div.className = 'card tile';
+  div.innerHTML = `<div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(String(value))}</div>`;
+  return div;
+}
+
+// ---------- 차트 ----------
+function renderCharts(data) {
+  chartsEl.innerHTML = '';
+  const stringCol = data.cols.find((c) => c.type === 'string');
+  const dateCol = data.cols.find((c) => c.type === 'date' || c.type === 'datetime');
+  const numericCols = data.cols.map((c, i) => ({ ...c, i })).filter((c) => c.type === 'number');
+  if (!numericCols.length) return;
+
+  if (dateCol) {
+    const dateIdx = data.cols.indexOf(dateCol);
+    renderLineChart(data, dateIdx, numericCols[0]);
+  } else if (stringCol) {
+    const stringIdx = data.cols.indexOf(stringCol);
+    renderBarChart(data, stringIdx, numericCols[0]);
+  }
+}
+
+function renderBarChart(data, catIdx, valueCol) {
+  const totals = new Map();
+  data.rows.forEach((r) => {
+    const cat = r[catIdx];
+    const val = r[valueCol.i];
+    if (cat === null || typeof val !== 'number') return;
+    totals.set(cat, (totals.get(cat) || 0) + val);
+  });
+  let entries = [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  let shown = entries.slice(0, 7);
+  const rest = entries.slice(7);
+  if (rest.length) {
+    const otherSum = rest.reduce((s, [, v]) => s + v, 0);
+    shown = [...shown, ['기타', otherSum]];
+  }
+  if (!shown.length) return;
+
+  const width = 480, barHeight = 28, gap = 12;
+  const height = shown.length * (barHeight + gap);
+  const maxVal = Math.max(...shown.map(([, v]) => v), 1);
+  const labelWidth = 110;
+  const plotWidth = width - labelWidth - 50;
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<p class="chart-title">${escapeHtml(data.cols[catIdx].label)}별 ${escapeHtml(valueCol.label)}</p>`;
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', height);
+
+  for (let g = 0; g <= 4; g++) {
+    const x = labelWidth + (plotWidth / 4) * g;
+    const line = document.createElementNS(svgNs, 'line');
+    line.setAttribute('x1', x); line.setAttribute('x2', x);
+    line.setAttribute('y1', 0); line.setAttribute('y2', height);
+    line.setAttribute('class', g === 0 ? 'baseline-line' : 'grid-line');
+    svg.appendChild(line);
+  }
+
+  shown.forEach(([cat, val], i) => {
+    const y = i * (barHeight + gap);
+    const w = Math.max((val / maxVal) * plotWidth, 2);
+
+    const label = document.createElementNS(svgNs, 'text');
+    label.setAttribute('x', labelWidth - 8);
+    label.setAttribute('y', y + barHeight / 2 + 4);
+    label.setAttribute('text-anchor', 'end');
+    label.setAttribute('class', 'bar-label');
+    label.textContent = truncate(String(cat), 14);
+    svg.appendChild(label);
+
+    const rect = document.createElementNS(svgNs, 'rect');
+    rect.setAttribute('x', labelWidth);
+    rect.setAttribute('y', y);
+    rect.setAttribute('width', w);
+    rect.setAttribute('height', barHeight);
+    rect.setAttribute('rx', 4);
+    rect.setAttribute('class', 'bar-rect');
+    rect.addEventListener('mousemove', (e) => showTooltip(e, `${cat}: ${formatNumber(val)}`));
+    rect.addEventListener('mouseleave', hideTooltip);
+    svg.appendChild(rect);
+
+    const valueLabel = document.createElementNS(svgNs, 'text');
+    valueLabel.setAttribute('x', labelWidth + w + 8);
+    valueLabel.setAttribute('y', y + barHeight / 2 + 4);
+    valueLabel.setAttribute('class', 'bar-label');
+    valueLabel.textContent = formatNumber(val);
+    svg.appendChild(valueLabel);
+  });
+
+  card.appendChild(svg);
+  chartsEl.appendChild(card);
+}
+
+function renderLineChart(data, dateIdx, valueCol) {
+  const points = data.rows
+    .map((r) => ({ x: r[dateIdx], y: r[valueCol.i] }))
+    .filter((p) => p.x instanceof Date && typeof p.y === 'number')
+    .sort((a, b) => a.x - b.x);
+  if (!points.length) return;
+
+  const width = 640, height = 260, padL = 50, padR = 20, padT = 20, padB = 30;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const xMin = points[0].x.getTime(), xMax = points[points.length - 1].x.getTime();
+  const yMax = Math.max(...points.map((p) => p.y), 1);
+  const yMin = Math.min(0, ...points.map((p) => p.y));
+
+  const xScale = (t) => padL + (xMax === xMin ? plotW / 2 : ((t - xMin) / (xMax - xMin)) * plotW);
+  const yScale = (v) => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<p class="chart-title">${escapeHtml(data.cols[dateIdx].label)}에 따른 ${escapeHtml(valueCol.label)}</p>`;
+  const wrap = document.createElement('div');
+  wrap.style.position = 'relative';
+
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', height);
+
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (plotH / 4) * g;
+    const line = document.createElementNS(svgNs, 'line');
+    line.setAttribute('x1', padL); line.setAttribute('x2', width - padR);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('class', g === 4 ? 'baseline-line' : 'grid-line');
+    svg.appendChild(line);
+  }
+
+  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(p.x.getTime())} ${yScale(p.y)}`).join(' ');
+  const path = document.createElementNS(svgNs, 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('class', 'line-path');
+  svg.appendChild(path);
+
+  const crosshair = document.createElementNS(svgNs, 'line');
+  crosshair.setAttribute('class', 'crosshair');
+  crosshair.setAttribute('y1', padT);
+  crosshair.setAttribute('y2', padT + plotH);
+  crosshair.style.display = 'none';
+  svg.appendChild(crosshair);
+
+  points.forEach((p) => {
+    const dot = document.createElementNS(svgNs, 'circle');
+    dot.setAttribute('cx', xScale(p.x.getTime()));
+    dot.setAttribute('cy', yScale(p.y));
+    dot.setAttribute('r', 3);
+    dot.setAttribute('class', 'line-dot');
+    svg.appendChild(dot);
+  });
+
+  const overlay = document.createElementNS(svgNs, 'rect');
+  overlay.setAttribute('x', padL); overlay.setAttribute('y', padT);
+  overlay.setAttribute('width', plotW); overlay.setAttribute('height', plotH);
+  overlay.setAttribute('fill', 'transparent');
+  overlay.addEventListener('mousemove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    const scaleX = width / rect.width;
+    const mouseX = (e.clientX - rect.left) * scaleX;
+    let nearest = points[0], nearestDist = Infinity;
+    points.forEach((p) => {
+      const dist = Math.abs(xScale(p.x.getTime()) - mouseX);
+      if (dist < nearestDist) { nearest = p; nearestDist = dist; }
+    });
+    crosshair.style.display = 'block';
+    crosshair.setAttribute('x1', xScale(nearest.x.getTime()));
+    crosshair.setAttribute('x2', xScale(nearest.x.getTime()));
+    showTooltip(e, `${nearest.x.toLocaleDateString('ko-KR')}: ${formatNumber(nearest.y)}`);
+  });
+  overlay.addEventListener('mouseleave', () => { crosshair.style.display = 'none'; hideTooltip(); });
+  svg.appendChild(overlay);
+
+  wrap.appendChild(svg);
+  card.appendChild(wrap);
+  chartsEl.appendChild(card);
+}
+
+function showTooltip(e, text) {
+  tooltip.textContent = text;
+  tooltip.style.left = e.pageX + 12 + 'px';
+  tooltip.style.top = e.pageY + 12 + 'px';
+  tooltip.classList.add('visible');
+}
+function hideTooltip() { tooltip.classList.remove('visible'); }
+
+// ---------- 테이블 ----------
+function renderTable(data) {
+  tableHead.innerHTML = '';
+  data.cols.forEach((col, i) => {
+    const th = document.createElement('th');
+    th.textContent = col.label;
+    if (col.type === 'number') th.classList.add('num');
+    th.addEventListener('click', () => {
+      sortState = sortState.col === i ? { col: i, dir: -sortState.dir } : { col: i, dir: 1 };
+      renderTableBody(data);
+    });
+    tableHead.appendChild(th);
+  });
+  renderTableBody(data);
+}
+
+function renderTableBody(data) {
+  let rows = [...data.rows];
+  if (sortState.col !== null) {
+    rows.sort((a, b) => {
+      const av = a[sortState.col], bv = b[sortState.col];
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av > bv) return sortState.dir;
+      if (av < bv) return -sortState.dir;
+      return 0;
+    });
+  }
+  tableBody.innerHTML = '';
+  if (!rows.length) {
+    tableBody.innerHTML = `<tr><td colspan="${data.cols.length}" class="empty-state">데이터가 없습니다.</td></tr>`;
+    return;
+  }
+  rows.forEach((r) => {
+    const tr = document.createElement('tr');
+    r.forEach((v, i) => {
+      const td = document.createElement('td');
+      const col = data.cols[i];
+      if (col.type === 'number') {
+        td.className = 'num';
+        td.textContent = v === null ? '' : formatNumber(v);
+      } else if (col.type === 'date' || col.type === 'datetime') {
+        td.textContent = v instanceof Date ? v.toLocaleDateString('ko-KR') : '';
+      } else {
+        td.textContent = v ?? '';
+      }
+      tr.appendChild(td);
+    });
+    tableBody.appendChild(tr);
+  });
+}
+
+function truncate(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------- 폴링 루프 ----------
+async function refresh() {
+  try {
+    const response = await fetchSheetJsonp();
+    const data = parseTable(response);
+    renderBudget(data);
+    renderTiles(data);
+    renderCharts(data);
+    renderTable(data);
+    hideError();
+    setStatus(true, `마지막 업데이트: ${new Date().toLocaleTimeString('ko-KR')}`);
+  } catch (err) {
+    setStatus(false, '업데이트 실패');
+    showError(err.message);
+  }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(refresh, POLL_INTERVAL_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearInterval(pollTimer);
+  } else {
+    refresh();
+    startPolling();
+  }
+});
+
+refreshBtn.addEventListener('click', refresh);
+
+refresh();
+startPolling();
+</script>
+</body>
+</html>
