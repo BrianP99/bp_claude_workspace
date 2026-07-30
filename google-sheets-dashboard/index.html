@@ -289,7 +289,19 @@
 <script>
 // ---- 설정: 이 값들만 바꾸면 다른 시트/예산으로 재사용 가능 ----
 const SHEET_ID = '1V2Nf4YhmSfdHKFjaw8ydObv4aj3e94M185qWdxueHF8';
-const GID = 1408217412;         // 특정 탭을 쓰려면 시트 URL의 gid=숫자 값을 넣기. null이면 첫 번째 탭.
+// 월별로 탭이 나뉘어 있을 때, 새 탭을 만들 때마다 여기에 { 월숫자: gid } 한 줄만 추가하면
+// 오늘 날짜(월)에 맞는 탭을 자동으로 골라 씁니다. gid는 그 탭을 연 상태에서 브라우저
+// 주소창 끝의 #gid=숫자 부분을 복사하면 됩니다.
+const GID_BY_MONTH = {
+  1: 284195230,   // Jan
+  2: 531638483,   // Feb
+  3: 186348152,   // Mar
+  4: 1460651234,  // Apr
+  5: 809049499,   // May
+  6: 1288554260,  // Jun
+  7: 1408217412,  // Jul
+};
+const GID = null;               // 이번 달이 위 목록에 없을 때 대신 쓸 gid. null이면 첫 번째 탭.
 const POLL_INTERVAL_MS = 10000; // 폴링 주기 (ms)
 const TOTAL_BUDGET = null;      // 고정 금액을 쓰려면 숫자 입력(예: 1000000). null이면 아래 BUDGET_LABEL로 시트에서 자동으로 찾음.
 const BUDGET_LABEL = 'Target Budget'; // 시트에서 이 텍스트가 적힌 셀을 찾아 바로 오른쪽 칸의 숫자를 예산으로 사용 (월급 등에 따라 매달 바뀌어도 자동 반영됨)
@@ -309,9 +321,18 @@ const refreshBtn = document.getElementById('refreshBtn');
 let pollTimer = null;
 let sortState = { col: null, dir: 1 };
 
+function resolveGid() {
+  const currentMonth = new Date().getMonth() + 1; // 1~12
+  if (Object.prototype.hasOwnProperty.call(GID_BY_MONTH, currentMonth)) {
+    return GID_BY_MONTH[currentMonth];
+  }
+  return GID;
+}
+
 function buildGvizUrl(callbackName) {
   const params = new URLSearchParams({ tqx: `out:json;responseHandler:${callbackName}` });
-  if (GID !== null) params.set('gid', String(GID));
+  const gid = resolveGid();
+  if (gid !== null && gid !== undefined) params.set('gid', String(gid));
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?${params.toString()}`;
 }
 
