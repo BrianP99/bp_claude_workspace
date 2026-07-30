@@ -291,7 +291,8 @@
 const SHEET_ID = '1V2Nf4YhmSfdHKFjaw8ydObv4aj3e94M185qWdxueHF8';
 const GID = 1408217412;         // 특정 탭을 쓰려면 시트 URL의 gid=숫자 값을 넣기. null이면 첫 번째 탭.
 const POLL_INTERVAL_MS = 10000; // 폴링 주기 (ms)
-const TOTAL_BUDGET = null;      // 전체 예산 금액(숫자)을 입력하면 예산 카드가 표시됨. 예: 1000000
+const TOTAL_BUDGET = null;      // 고정 금액을 쓰려면 숫자 입력(예: 1000000). null이면 아래 BUDGET_LABEL로 시트에서 자동으로 찾음.
+const BUDGET_LABEL = 'Target Budget'; // 시트에서 이 텍스트가 적힌 셀을 찾아 바로 오른쪽 칸의 숫자를 예산으로 사용 (월급 등에 따라 매달 바뀌어도 자동 반영됨)
 // ------------------------------------------------------------
 
 const statusDot = document.getElementById('statusDot');
@@ -414,16 +415,33 @@ function totalSpent(data) {
   return data.rows.reduce((sum, r) => sum + (typeof r[idx] === 'number' ? r[idx] : 0), 0);
 }
 
+// 시트 아무 칸에서나 "라벨" 텍스트를 찾아 바로 오른쪽 칸의 숫자 값을 읽어온다.
+// (예: M열에 "Target Budget", N열에 그 금액이 있는 표를 자동으로 찾아냄)
+function findLabeledValue(data, label) {
+  for (const row of data.rows) {
+    for (let i = 0; i < row.length - 1; i++) {
+      if (typeof row[i] === 'string' && row[i].trim() === label && typeof row[i + 1] === 'number') {
+        return row[i + 1];
+      }
+    }
+  }
+  return null;
+}
+
 // ---------- 예산 카드 ----------
 function renderBudget(data) {
-  if (TOTAL_BUDGET === null || TOTAL_BUDGET === undefined) {
+  const budget = TOTAL_BUDGET !== null && TOTAL_BUDGET !== undefined
+    ? TOTAL_BUDGET
+    : findLabeledValue(data, BUDGET_LABEL);
+
+  if (budget === null || budget === undefined) {
     budgetCard.style.display = 'none';
     return;
   }
   budgetCard.style.display = '';
   const spent = totalSpent(data);
-  const remaining = TOTAL_BUDGET - spent;
-  const pct = TOTAL_BUDGET > 0 ? (spent / TOTAL_BUDGET) * 100 : 0;
+  const remaining = budget - spent;
+  const pct = budget > 0 ? (spent / budget) * 100 : 0;
   const fillPct = Math.min(pct, 100);
 
   let status = 'good', icon = '✓', statusLabel = '여유 있음';
@@ -443,7 +461,7 @@ function renderBudget(data) {
     </div>
     <div class="budget-sub">
       <span>지출 ${formatNumber(spent)}원</span>
-      <span>예산 ${formatNumber(TOTAL_BUDGET)}원 · ${formatNumber(Math.round(pct * 10) / 10)}% 사용</span>
+      <span>예산 ${formatNumber(budget)}원 · ${formatNumber(Math.round(pct * 10) / 10)}% 사용</span>
     </div>
   `;
 }
