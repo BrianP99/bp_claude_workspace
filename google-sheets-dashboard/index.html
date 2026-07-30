@@ -289,7 +289,7 @@
 <script>
 // ---- 설정: 이 값들만 바꾸면 다른 시트/예산으로 재사용 가능 ----
 const SHEET_ID = '1V2Nf4YhmSfdHKFjaw8ydObv4aj3e94M185qWdxueHF8';
-const GID = null;               // 특정 탭을 쓰려면 시트 URL의 gid=숫자 값을 넣기. null이면 첫 번째 탭.
+const GID = 1408217412;         // 특정 탭을 쓰려면 시트 URL의 gid=숫자 값을 넣기. null이면 첫 번째 탭.
 const POLL_INTERVAL_MS = 10000; // 폴링 주기 (ms)
 const TOTAL_BUDGET = null;      // 전체 예산 금액(숫자)을 입력하면 예산 카드가 표시됨. 예: 1000000
 // ------------------------------------------------------------
@@ -364,19 +364,27 @@ function parseDateCell(v) {
 
 function parseTable(response) {
   const table = response.table;
-  const cols = table.cols.map((c, i) => ({
-    id: c.id || `col${i}`,
-    label: c.label || `Column ${i + 1}`,
-    type: c.type,
-  }));
-  const rows = table.rows.map((r) =>
-    cols.map((col, i) => {
+  const rawCols = table.cols.map((c) => ({ id: c.id, label: c.label, type: c.type }));
+  const rawRows = table.rows.map((r) =>
+    rawCols.map((col, i) => {
       const cell = r.c[i];
       if (!cell || cell.v === null || cell.v === undefined) return null;
       if (col.type === 'date' || col.type === 'datetime') return parseDateCell(cell.v);
       return cell.v;
     })
   );
+
+  // 헤더가 비어있고 데이터도 전혀 없는 컬럼(시트 끝쪽 빈 여백 등)은 제외한다.
+  const keepIdx = rawCols
+    .map((c, i) => i)
+    .filter((i) => rawCols[i].label || rawRows.some((r) => r[i] !== null));
+
+  const cols = keepIdx.map((i) => ({
+    id: rawCols[i].id || `col${i}`,
+    label: rawCols[i].label || `Column ${i + 1}`,
+    type: rawCols[i].type,
+  }));
+  const rows = rawRows.map((r) => keepIdx.map((i) => r[i]));
   return { cols, rows };
 }
 
@@ -443,13 +451,16 @@ function renderBudget(data) {
 // ---------- 통계 타일 ----------
 function renderTiles(data) {
   tilesEl.innerHTML = '';
+  // 시트에 보조 집계표(피벗 등)가 같은 탭에 섞여 있어도 헷갈리지 않도록,
+  // 요약 타일은 실제 지출 컬럼인 첫 번째 숫자 컬럼 하나만 사용한다.
   const numericCols = data.cols
     .map((c, i) => ({ ...c, i }))
-    .filter((c) => c.type === 'number');
+    .filter((c) => c.type === 'number')
+    .slice(0, 1);
 
   tilesEl.appendChild(makeTile('전체 행', formatNumber(data.rows.length)));
 
-  numericCols.slice(0, 5).forEach((col) => {
+  numericCols.forEach((col) => {
     const values = data.rows.map((r) => r[col.i]).filter((v) => typeof v === 'number');
     if (!values.length) return;
     const sum = values.reduce((a, b) => a + b, 0);
